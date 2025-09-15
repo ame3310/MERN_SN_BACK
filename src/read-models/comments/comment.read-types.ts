@@ -1,6 +1,14 @@
-import type { PublicComment } from "@modules/comments/comment.types";
+export type PublicCommentBase = {
+  id: string;
+  postId: string;
+  authorId: string;
+  author?: { id: string; username: string; avatarUrl?: string | null };
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+};
 
-export type PublicCommentWithMeta = PublicComment & {
+export type PublicCommentWithMeta = PublicCommentBase & {
   likeCount: number;
   likedByMe: boolean;
 };
