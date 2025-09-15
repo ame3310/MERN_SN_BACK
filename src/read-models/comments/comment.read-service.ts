@@ -1,7 +1,22 @@
 import { Comment } from "@modules/comments/comment.model";
-import { toPublicComment } from "@modules/comments/comment.types";
 import type { PublicCommentWithMeta } from "@read-models/comments/comment.read-types";
-import { Types } from "mongoose";
+import { PipelineStage, Types } from "mongoose";
+
+type Row = {
+  _id: Types.ObjectId;
+  post: Types.ObjectId;
+  author: Types.ObjectId;
+  content: string;
+  createdAt: Date;
+  updatedAt: Date;
+  likeCount?: number;
+  likedByMe?: boolean;
+  authorDoc?: {
+    _id: Types.ObjectId;
+    username: string;
+    avatarUrl?: string | null;
+  };
+};
 
 export async function listByPostWithMeta(
   userId: string | null,
@@ -20,7 +35,7 @@ export async function listByPostWithMeta(
   const _limit = Math.min(100, Math.max(1, limit));
   const skip = (_page - 1) * _limit;
 
-  const pipeline: any[] = [
+  const pipeline: PipelineStage[] = [
     { $match: { post: cid } },
     { $sort: { createdAt: -1 } },
     { $skip: skip },
@@ -53,7 +68,7 @@ export async function listByPostWithMeta(
     },
 
     ...(uid
-      ? [
+      ? ([
           {
             $lookup: {
               from: "likes",
@@ -78,8 +93,8 @@ export async function listByPostWithMeta(
           {
             $addFields: { likedByMe: { $gt: [{ $size: "$likedByMeAgg" }, 0] } },
           },
-        ]
-      : [{ $addFields: { likedByMe: false } }]),
+        ] as PipelineStage[])
+      : ([{ $addFields: { likedByMe: false } }] as PipelineStage[])),
 
     {
       $lookup: {
@@ -94,41 +109,49 @@ export async function listByPostWithMeta(
 
     {
       $project: {
+        _id: 1,
         post: 1,
         author: 1,
-        authorDoc: 1,
         content: 1,
         createdAt: 1,
         updatedAt: 1,
         likeCount: 1,
         likedByMe: 1,
+        "authorDoc._id": 1,
+        "authorDoc.username": 1,
+        "authorDoc.avatarUrl": 1,
       },
     },
   ];
 
   const [rows, total] = await Promise.all([
-    Comment.aggregate(pipeline).exec(),
+    Comment.aggregate<Row>(pipeline).exec(),
     Comment.countDocuments({ post: cid }),
   ]);
 
-  const data: PublicCommentWithMeta[] = rows.map((r: any) => {
-    const base = toPublicComment(r as any);
-    const author =
-      r.authorDoc && r.author
-        ? {
-            id: String(r.author),
-            username: r.authorDoc.username as string,
-            avatarUrl: (r.authorDoc.avatarUrl as string | null) ?? null,
-          }
-        : undefined;
-
-    return {
-      ...base,
-      author,
-      likeCount: r.likeCount ?? 0,
-      likedByMe: !!r.likedByMe,
-    };
-  });
+  const data: PublicCommentWithMeta[] = rows.map((r) => ({
+    id: String(r._id),
+    postId: String(r.post),
+    authorId: String(r.author),
+    author: r.authorDoc
+      ? {
+          id: String(r.authorDoc._id),
+          username: r.authorDoc.username,
+          avatarUrl: r.authorDoc.avatarUrl ?? null,
+        }
+      : undefined,
+    content: r.content,
+    createdAt:
+      r.createdAt instanceof Date
+        ? r.createdAt.toISOString()
+        : String(r.createdAt),
+    updatedAt:
+      r.updatedAt instanceof Date
+        ? r.updatedAt.toISOString()
+        : String(r.updatedAt),
+    likeCount: r.likeCount ?? 0,
+    likedByMe: Boolean(r.likedByMe),
+  }));
 
   return { data, page: _page, limit: _limit, total };
 }
