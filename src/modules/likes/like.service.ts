@@ -28,15 +28,13 @@ async function validateTarget(
       ERR.COMMON.BAD_REQUEST
     );
   }
-
   const Model = TargetModels[targetType];
   if (!Model) {
     throw ApiError.badRequest(
       "Tipo de objetivo inválido",
-      (ERR.LIKE as any)?.INVALID_TARGET_TYPE ?? ERR.COMMON.BAD_REQUEST
+      ERR.COMMON.BAD_REQUEST
     );
   }
-
   const exists = await Model.exists({ _id: targetId });
   if (!exists) {
     throw ApiError.notFound(
@@ -53,17 +51,28 @@ export async function likeTarget(
 ): Promise<PublicLike> {
   await validateTarget(targetId, targetType);
 
-  const exists = await Like.findOne({ user: userId, targetId, targetType });
-  if (exists) {
-    throw ApiError.badRequest("Ya diste like", ERR.LIKE.ALREADY_EXISTS);
+  try {
+    const created: LikeDocument = await Like.create({
+      user: userId,
+      targetId,
+      targetType,
+    });
+    return toPublicLike(created);
+  } catch (e: unknown) {
+    const code =
+      typeof e === "object" && e && "code" in e
+        ? (e as { code?: number }).code
+        : undefined;
+    if (code === 11000) {
+      const existing = await Like.findOne({
+        user: userId,
+        targetId,
+        targetType,
+      });
+      if (existing) return toPublicLike(existing);
+    }
+    throw e;
   }
-
-  const created: LikeDocument = await Like.create({
-    user: userId,
-    targetId,
-    targetType,
-  });
-  return toPublicLike(created);
 }
 
 export async function unlikeTarget(
@@ -72,7 +81,6 @@ export async function unlikeTarget(
   targetType: TargetType
 ): Promise<void> {
   await validateTarget(targetId, targetType);
-
   const deleted = await Like.findOneAndDelete({
     user: userId,
     targetId,
